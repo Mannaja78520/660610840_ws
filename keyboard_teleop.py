@@ -114,6 +114,7 @@ class KeyboardControl(Node):
         self.moveSpeed = self.clip(self.moveSpeed, -self.maxSpeed, self.maxSpeed)
         self.slideSpeed = self.clip(self.slideSpeed, -self.maxSpeed, self.maxSpeed)
         self.turnSpeed = self.clip(self.turnSpeed, -self.maxSpeed, self.maxSpeed)
+        self.show_log()
 
     # --------------------------------------------------
 
