@@ -22,7 +22,7 @@ class KeyboardControl(Node):
         )
 
         self.cmd_vel_pub = self.create_publisher(
-            Twist, '/cmd_vel_command', qos_profile_sensor_data
+            Twist, '/cmd_vel_control', qos_profile_sensor_data
         )
 
         # ===== Parameters =====

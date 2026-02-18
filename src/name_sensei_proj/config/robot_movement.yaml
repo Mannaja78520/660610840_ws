@@ -1,0 +1,24 @@
+robot_movement_control_node:
+  ros__parameters:
+    cmd_goal_xy_topic: "/mor_luam/cmd_move_goal_xy"
+    cmd_out_topic: "/mor_luam/cmd_vel/move"
+    ticks_topic: "/mor_luam/feedback/drive_ticks"
+    steer_deg_topic: "/mor_luam/feedback/steer_deg"
+    imu_yaw_deg_topic: "/mor_luam/feedback/imu_yaw_deg"
+
+    timer_period: 0.03
+    pos_epsilon_m: 0.02
+    steer_tolerance_deg: 5.0
+    steer_settle_time: 0.10
+    steer_leak_ticks_thr: 5
+    keep_going_tol_deg: 5.0
+
+    wheel_radius_m: 0.0381
+    ticks_per_rev: 64
+    gear_ratio: 6.21118
+    max_rpm: 500.0
+    rpm_ramp_per_sec: 300.0
+
+    # ทิศหมุนกำหนดโหมด:
+    steer_motor_dir:  1    # RPM>0 = สเตียร์
+    drive_motor_dir: -1    # RPM<0 = วิ่งหน้า

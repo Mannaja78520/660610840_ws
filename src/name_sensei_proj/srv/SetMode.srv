@@ -1,0 +1,4 @@
+bool master_lock  # true = ตัดการควบคุมจากคนถาวร, false = ปกติ
+---
+bool success
+string message

@@ -7,10 +7,14 @@ import mediapipe as mp
 import time
 
 from rclpy.node import Node
+from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 from rclpy.qos import qos_profile_sensor_data
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+
+import os
+from ament_index_python.packages import get_package_share_directory
 
 class DualHandSmoothControl(Node):
 
@@ -55,8 +59,8 @@ class DualHandSmoothControl(Node):
         self.pinch_joint_dist = 0.16
         self.pinch_middle_gap = 0.05
         
-        self.claw_threshold = 0.135
-        self.claw_tolerance = 0.45      # ตัวคูณสำหรับ Claw Mode
+        self.claw_threshold = 0.125
+        self.claw_tolerance = 0.4      # ตัวคูณสำหรับ Claw Mode
         self.claw_index_mid_gap = 0.08
         self.claw_thumb_idx_gap = 0.10
         self.fold_trigger = 0.025      # ระยะพับนิ้วเพื่อเริ่มเลี้ยว
@@ -75,7 +79,16 @@ class DualHandSmoothControl(Node):
         # ==========================================================
         # 🛠️ INTERNAL SYSTEM (ไม่ต้องแก้ไข)
         # ==========================================================
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel_command', qos_profile_sensor_data)
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel_control', qos_profile_sensor_data)
+        
+        # เพิ่ม Subscriber เพื่อรับข้อความแจ้งเตือนจาก LIDAR และสถานะจาก Server
+        self.alert_sub = self.create_subscription(String, '/obstacle_alert', self.alert_callback, 10)
+        self.mode_sub = self.create_subscription(String, '/system_mode', self.mode_callback, 10)
+        
+        self.last_alert_msg = ""
+        self.last_alert_time = 0
+        self.current_system_mode = "INITIALIZING..."
+        
         self.filtered_x = self.filtered_y = self.filtered_z = 0.0
         self.joy_center = None
         self.pinch_start_time = self.claw_start_time = self.latch_start_time = None
@@ -83,12 +96,30 @@ class DualHandSmoothControl(Node):
         self.last_pinch_y = self.last_claw_y = None
         self.draw_pinch_pos = self.draw_pinch_ref = self.draw_pinch_curr = None
         self.draw_claw_ref = self.draw_claw_curr = None
-
-        base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
+        
+        # Mediapipe Hand Landmarker Setup
+        package_share_directory = get_package_share_directory('name_sensei_proj')
+        model_path = os.path.join(package_share_directory, 'models', 'hand_landmarker.task')
+        base_options = python.BaseOptions(model_asset_path=model_path,
+                                          delegate=python.BaseOptions.Delegate.CPU  # <--- เปลี่ยนตรงนี้จาก CPU เป็น GPU
+                                          )
+    
         options = vision.HandLandmarkerOptions(base_options=base_options, num_hands=2, running_mode=vision.RunningMode.VIDEO)
+        
         self.detector = vision.HandLandmarker.create_from_options(options)
+        
         self.cap = cv2.VideoCapture(0)
+        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        
         self.get_logger().info("Dual Hand Control - Variable Driven Mode Started")
+        
+    def alert_callback(self, msg):
+        self.last_alert_msg = msg.data
+        self.last_alert_time = time.time()
+
+    def mode_callback(self, msg):
+        self.current_system_mode = msg.data
 
     def smooth(self, target, current):
         return self.alpha * target + (1 - self.alpha) * current
@@ -121,8 +152,14 @@ class DualHandSmoothControl(Node):
     def process_frame(self, frame):
         timestamp_ms = int(time.time() * 1000)
         h, w, _ = frame.shape
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        
+        small_frame = cv2.resize(frame, (320, 240)) # ลดขนาดภาพที่จะส่งให้ AI
+        rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_small)
+        
+        # rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        
         result = self.detector.detect_for_video(mp_image, timestamp_ms)
 
         target_x, target_y, target_z = 0.0, 0.0, 0.0
@@ -153,7 +190,11 @@ class DualHandSmoothControl(Node):
                 fold_r = right_hand[16].y - right_hand[13].y
 
                 is_turning = False
-                if fold_l > self.fold_trigger: 
+                if fold_l > self.fold_trigger and fold_r > self.fold_trigger:
+                    # ถ้าพับทั้งคู่ ไม่ต้องทำอะไร (หยุดหมุน)
+                    target_z = 0.0
+                    is_turning = False
+                elif fold_l > self.fold_trigger: 
                     target_z = fold_l * self.angular_speed * self.rot_gain
                     is_turning = True
                 elif fold_r > self.fold_trigger: 
@@ -250,24 +291,67 @@ class DualHandSmoothControl(Node):
         cmd.linear.x, cmd.linear.y, cmd.angular.z = float(self.filtered_x), float(self.filtered_y), float(self.filtered_z)
         self.cmd_pub.publish(cmd)
 
+        # ==========================================================
+        # 🎨 PROFESSIONAL UI OVERLAY
+        # ==========================================================
+        frame = cv2.resize(frame, (1280, 720)) # ปรับขนาดกลับเป็นต้นฉบับหลังประมวลผลมือเสร็จ
+        h, w, _ = frame.shape
         overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (250, 150), self.ui_bg_color, -1)
-        cv2.rectangle(overlay, (w - 260, 10), (w - 10, 180), self.ui_telemetry_bg, -1)
+        
+        # 1. วาดแถบพื้นหลัง (Semi-transparent)
+        # แถบบน (System Mode)
+        cv2.rectangle(overlay, (0, 0), (w, 60), (20, 20, 20), -1) 
+        # กล่องซ้าย (Speed Limits)
+        cv2.rectangle(overlay, (15, 75), (260, 230), (40, 40, 40), -1) 
+        # กล่องขวา (Live Telemetry)
+        cv2.rectangle(overlay, (w - 275, 75), (w - 15, 230), (20, 20, 20), -1) 
+        
         frame = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
+        
+        # 2. แสดง SYSTEM MODE (ด้านบนซ้าย)
+        mode_color = (0, 255, 0) # เขียว (Manual)
+        if "AUTO" in self.current_system_mode: mode_color = (0, 165, 255) # ส้ม (LIDAR)
+        if "LOCKED" in self.current_system_mode: mode_color = (0, 0, 255) # แดง (Lock)
+        cv2.putText(frame, f"STATUS: {self.current_system_mode}", (25, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, mode_color, 2)
 
-        cv2.putText(frame, "SPEED LIMITS", (25, 35), 0, 0.6, (255, 255, 255), 2)
-        cv2.putText(frame, f"LIN: {self.linear_speed:.3f}", (25, 70), 0, 0.5, self.ui_lin_color, 1)
+        # 3. แสดง SPEED LIMITS (ด้านซ้าย)
+        ty_speed = 105
+        cv2.putText(frame, "CONTROL SETTINGS", (30, ty_speed), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+        
+        # Linear Speed Bar
+        cv2.putText(frame, f"LIN Limit: {self.linear_speed:.2f}", (30, ty_speed + 35), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.ui_lin_color, 1)
         l_bar = int((self.linear_speed / self.max_linear) * self.ui_bar_width)
-        cv2.rectangle(frame, (25, 80), (25 + l_bar, 90), self.ui_lin_color, -1)
-        cv2.putText(frame, f"ANG: {self.angular_speed:.3f}", (25, 120), 0, 0.5, self.ui_ang_color, 1)
+        cv2.rectangle(frame, (30, ty_speed + 45), (30 + self.ui_bar_width, ty_speed + 55), (100, 100, 100), 1) # Border
+        cv2.rectangle(frame, (30, ty_speed + 45), (30 + l_bar, ty_speed + 55), self.ui_lin_color, -1) # Fill
+        
+        # Angular Speed Bar
+        cv2.putText(frame, f"ANG Limit: {self.angular_speed:.2f}", (30, ty_speed + 85), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.ui_ang_color, 1)
         a_bar = int((self.angular_speed / self.max_angular) * self.ui_bar_width)
-        cv2.rectangle(frame, (25, 130), (25 + a_bar, 140), self.ui_ang_color, -1)
+        cv2.rectangle(frame, (30, ty_speed + 95), (30 + self.ui_bar_width, ty_speed + 105), (100, 100, 100), 1) # Border
+        cv2.rectangle(frame, (30, ty_speed + 95), (30 + a_bar, ty_speed + 105), self.ui_ang_color, -1) # Fill
 
-        st_x = w - 245
-        cv2.putText(frame, "LIVE TELEMETRY", (st_x, 35), 0, 0.6, (200, 200, 200), 2)
-        cv2.putText(frame, f"X: {self.filtered_x:.3f}", (st_x, 70), 0, 0.6, (100, 255, 100), 2)
-        cv2.putText(frame, f"Y: {self.filtered_y:.3f}", (st_x, 105), 0, 0.6, (100, 255, 255), 2)
-        cv2.putText(frame, f"Z: {self.filtered_z:.3f}", (st_x, 140), 0, 0.6, (100, 100, 255), 2)
+        # 4. แสดง LIVE TELEMETRY (ด้านขวา)
+        tx_tele = w - 260
+        ty_tele = 105
+        cv2.putText(frame, "LIVE TELEMETRY", (tx_tele, ty_tele), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+        cv2.putText(frame, f"X (Linear):  {self.filtered_x:+.3f}", (tx_tele, ty_tele + 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 2)
+        cv2.putText(frame, f"Y (Lateral): {self.filtered_y:+.3f}", (tx_tele, ty_tele + 75), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 255), 2)
+        cv2.putText(frame, f"Z (Angular): {self.filtered_z:+.3f}", (tx_tele, ty_tele + 110), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 255), 2)
+
+        # 5. แสดง OBSTACLE ALERT (แถบแดงด้านล่างสุด)
+        if time.time() - self.last_alert_time < 1.5:
+            cv2.rectangle(frame, (0, h-50), (w, h), (0, 0, 180), -1)
+            # ใส่เงาตัวอักษรให้ดูง่ายขึ้น
+            cv2.putText(frame, f"SENSOR ALERT: {self.last_alert_msg}", (40, h-18), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3) # Shadow
+            cv2.putText(frame, f"SENSOR ALERT: {self.last_alert_msg}", (40, h-18), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2) # Text
 
         if hasattr(self, 'draw_pinch_ref') and self.pinch_start_time is not None:
             prx, pry = self.draw_pinch_ref

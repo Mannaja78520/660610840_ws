@@ -1,0 +1,27 @@
+joystick_control_node:
+  ros__parameters:
+    # topics
+    cmd_vel_topic: "/mor_luam/cmd_vel"
+    mode_topic: "/mor_luam/move_mode"
+
+    # rates
+    timer_period: 0.1   # seconds
+
+    # speed limits
+    maxlinear_speed: 0.25   # m/s
+    maxpwm_speed: 1023.0    # PWM units
+
+    # default mode at start: "mps" (linear-speed mode) or "manual" (PWM mode)
+    default_mode: "mps"
+
+    # axis invert flags (true/false)
+    invert_lx: true     # your code multiplies by -1 already; keep consistent here
+    invert_ly: false
+    invert_rx: true
+    invert_ry: false
+
+    # scale factors (if you want to fine tune sensitivity)
+    scale_lx: 1.0
+    scale_ly: 1.0
+    scale_rx: 1.0
+    scale_ry: 1.0
