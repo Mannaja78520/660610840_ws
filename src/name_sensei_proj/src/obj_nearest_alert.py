@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+from name_sensei_proj.msg import MecanumCmd
 from std_msgs.msg import String
 import math
 
@@ -20,7 +21,7 @@ class Obj_nearest_alert(Node):
         self.robot_half_width = 0.190 / 2   # 0.095 m
 
         self.subscription = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_collision', 10)
+        self.cmd_vel_pub = self.create_publisher(MecanumCmd, '/cmd_collision', 10)
         self.alert_pub = self.create_publisher(String, '/obstacle_alert', 10)
 
     def rotate_ranges(self, msg, yaw_deg):
@@ -73,10 +74,10 @@ class Obj_nearest_alert(Node):
         self.control_mecanum(vel_x, vel_y)
 
     def control_mecanum(self, vx, vy):
-        move_cmd = Twist()
+        move_cmd = MecanumCmd()
         limit = 0.3  # ปรับ speed limit ขึ้นเล็กน้อยเพื่อให้หนีทัน
-        move_cmd.linear.x = max(min(vx, limit), -limit)
-        move_cmd.linear.y = max(min(vy, limit), -limit)
+        move_cmd.x = max(min(vx, limit), -limit)
+        move_cmd.y = max(min(vy, limit), -limit)
         self.cmd_vel_pub.publish(move_cmd)
 
 def main(args=None):

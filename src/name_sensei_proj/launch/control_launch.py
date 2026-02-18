@@ -1,43 +1,50 @@
-import os
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, ThisLaunchFileDir
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription, ExecuteProcess
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from ament_index_python.packages import get_package_share_directory
+from launch_ros.substitutions import FindPackageShare
+import os
 
 def generate_launch_description():
-    ld = LaunchDescription()
 
-    package_dir = get_package_share_directory('mor_luam')
-
-    # motor_config = os.path.join(
-    #     get_package_share_directory('mor_luam'),
-    #     'config',
-    #     'motor_config.yaml'
-    # )
-
-    joy = Node(
-        package="joy",
-        executable="joy_node",
-        name="Joy_Node",
-        output="screen",
-        # namespace="",
-        # parameters=[{"autorepeat_rate": 50.0}],
-        # arguments=["--dev", "/dev/input/js0"],  # replace with your joystick device path
-        # remappings = [
-        #     ('/joy', '/mor_luam/joy')
-        # ]
-    )   
-
-    joystick_control = Node(
-        package="mor_luam",
-        executable="ps_joystick_control.py",
-        name="Joystick_Node",
-        # output="screen",
-        namespace="",
+    keyboard = Node(
+        package='name_sensei_proj',
+        executable='keyboard_control_own_msg.py',
+        name='keyboard_control_node',
+        output='screen',
+        # parameters=[LaunchConfiguration('params_file')]
+        # สามารถใส่ remappings=[('cmd_vel','/your/other/cmd_vel')] ได้ถ้าต้องการ
     )
     
-    ld.add_action(joy)
-    ld.add_action(joystick_control)
+    mediapipe = Node(
+        package='name_sensei_proj',
+        executable='mediapipe_control_own_msg.py',
+        name='mediapipe_control_node',
+        output='screen',
+        # parameters=[LaunchConfiguration('params_file')]
+        # สามารถใส่ remappings=[('cmd_vel','/your/other/cmd_vel')] ได้ถ้าต้องการ
+    )
+    
+    main_controller_srv_server = Node(
+        package='name_sensei_proj',
+        executable='main_controller.py',
+        name='main_controller_node',
+        output='screen',
+        # parameters=[LaunchConfiguration('params_file')]
+        # สามารถใส่ remappings=[('cmd_vel','/your/other/cmd_vel')] ได้ถ้าต้องการ
+    )
+    
+    obj_avoid = Node(
+        package='name_sensei_proj',
+        executable='obj_nearest_alert.py',
+        name='obj_avoid_node',
+        output='screen',
+        # parameters=[LaunchConfiguration('params_file')]
+        # สามารถใส่ remappings=[('cmd_vel','/your/other/cmd_vel')] ได้ถ้าต้องการ
+    )
 
-    return ld
+    return LaunchDescription([
+                                mediapipe, 
+                                main_controller_srv_server,
+                                obj_avoid
+                            ])

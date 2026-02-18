@@ -1,48 +1,40 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist # ใช้สำหรับ Output
 from std_msgs.msg import String
 from rclpy.qos import qos_profile_sensor_data
 
-# เปลี่ยนจาก SetBool มาใช้ SetMode ที่คุณสร้างเอง
+# นำเข้า Message และ Service ที่คุณสร้างเอง
 from name_sensei_proj.srv import SetMode
+from name_sensei_proj.msg import MecanumCmd 
 
 class MainDecisionServer(Node):
     def __init__(self):
         super().__init__('main_decision_server')
         
-        # Subscribe รับคำสั่งจาก Hand และ LIDAR
-        self.create_subscription(Twist, '/cmd_vel_control', self.hand_callback, qos_profile_sensor_data)
-        self.create_subscription(Twist, '/cmd_collision', self.collision_callback, 10)
+        # 1. Subscribe รับข้อมูลขาเข้าแบบ MecanumCmd
+        self.create_subscription(MecanumCmd, '/cmd_vel_control', self.hand_callback, qos_profile_sensor_data)
+        self.create_subscription(MecanumCmd, '/cmd_collision', self.collision_callback, 10)
         
-        # Publish คำสั่งจริงไปที่หุ่นยนต์
+        # 2. Publish ข้อมูลขาออกเป็น Twist ตามที่คุณต้องการ
         self.real_cmd_pub = self.create_publisher(Twist, '/cmd_vel_command', 10)
         self.status_pub = self.create_publisher(String, '/system_mode', 10)
 
-        # --- แก้ไขตรงนี้: เปลี่ยนเป็น SetMode ---
         self.srv = self.create_service(SetMode, '/set_master_lock', self.handle_lock_service)
 
         self.master_lock = False
         self.collision_active = False
-        self.last_hand_cmd = Twist()
-        self.last_collision_cmd = Twist()
+        self.last_hand_cmd = MecanumCmd()
+        self.last_collision_cmd = MecanumCmd()
         
         self.create_timer(0.05, self.decision_loop)
-        self.get_logger().info("Main Decision Server with Custom SetMode SRV started.")
+        # self.get_logger().info("Decision Server: Receiving MecanumCmd -> Publishing Twist")
 
     def handle_lock_service(self, request, response):
-        # เปลี่ยนจาก request.data เป็น request.master_lock ตามไฟล์ .srv ของคุณ
         self.master_lock = request.master_lock
-        
         response.success = True
-        if self.master_lock:
-            response.message = "SYSTEM LOCKED: Hand control disabled by admin."
-            self.get_logger().warn("Master Lock Engaged!")
-        else:
-            response.message = "SYSTEM UNLOCKED: Hand control enabled."
-            self.get_logger().info("Master Lock Disengaged.")
-            
+        response.message = f"Master Lock Status: {self.master_lock}"
         return response
 
     def hand_callback(self, msg):
@@ -50,27 +42,40 @@ class MainDecisionServer(Node):
 
     def collision_callback(self, msg):
         self.last_collision_cmd = msg
-        if abs(msg.linear.x) > 0.01 or abs(msg.linear.y) > 0.01:
+        # ตรวจสอบว่าระบบหลบหลีกทำงานหรือไม่
+        if abs(msg.x) > 0.01 or abs(msg.y) > 0.01:
             self.collision_active = True
         else:
             self.collision_active = False
 
     def decision_loop(self):
-        final_cmd = Twist()
+        # สร้าง Message วัตถุ Twist สำหรับส่งออก
+        final_msg = Twist() 
         mode_str = ""
 
+        # --- ส่วนการตัดสินใจ (Priority Logic) ---
         if self.master_lock:
-            final_cmd = Twist() # หยุดนิ่ง
+            # หยุดนิ่ง (Twist เริ่มต้นเป็น 0 อยู่แล้ว)
             mode_str = "LOCKED: SERVICE OVERRIDE"
+        
         elif self.collision_active:
-            final_cmd = self.last_collision_cmd
+            # แปลง MecanumCmd จาก LIDAR เป็น Twist
+            final_msg.linear.x = self.last_collision_cmd.x
+            final_msg.linear.y = self.last_collision_cmd.y
+            final_msg.angular.z = self.last_collision_cmd.omega_z
             mode_str = "AUTO: OBSTACLE AVOIDANCE"
+            
         else:
-            final_cmd = self.last_hand_cmd
+            # แปลง MecanumCmd จากมือคน (MediaPipe) เป็น Twist
+            final_msg.linear.x = self.last_hand_cmd.x
+            final_msg.linear.y = self.last_hand_cmd.y
+            final_msg.angular.z = self.last_hand_cmd.omega_z
             mode_str = "MANUAL: HAND GESTURE"
 
-        self.real_cmd_pub.publish(final_cmd)
+        # ส่งคำสั่ง Twist ออกไป
+        self.real_cmd_pub.publish(final_msg)
         
+        # ส่งสถานะระบบ
         status_msg = String()
         status_msg.data = mode_str
         self.status_pub.publish(status_msg)

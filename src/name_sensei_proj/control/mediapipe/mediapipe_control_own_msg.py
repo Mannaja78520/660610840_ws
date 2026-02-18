@@ -8,10 +8,11 @@ import time
 
 from rclpy.node import Node
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist
+# from geometry_msgs.msg import Twist
 from rclpy.qos import qos_profile_sensor_data
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from name_sensei_proj.msg import MecanumCmd
 
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -79,7 +80,7 @@ class DualHandSmoothControl(Node):
         # ==========================================================
         # 🛠️ INTERNAL SYSTEM (ไม่ต้องแก้ไข)
         # ==========================================================
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel_control', qos_profile_sensor_data)
+        self.cmd_pub = self.create_publisher(MecanumCmd, '/cmd_vel_control', qos_profile_sensor_data)
         
         # เพิ่ม Subscriber เพื่อรับข้อความแจ้งเตือนจาก LIDAR และสถานะจาก Server
         self.alert_sub = self.create_subscription(String, '/obstacle_alert', self.alert_callback, 10)
@@ -318,8 +319,8 @@ class DualHandSmoothControl(Node):
         self.filtered_x = self.smooth(target_x, self.filtered_x)
         self.filtered_y = self.smooth(-target_y, self.filtered_y)
         self.filtered_z = self.smooth(target_z, self.filtered_z)
-        cmd = Twist()
-        cmd.linear.x, cmd.linear.y, cmd.angular.z = float(self.filtered_x), float(self.filtered_y), float(self.filtered_z)
+        cmd = MecanumCmd()
+        cmd.x, cmd.y, cmd.omega_z = float(self.filtered_x), float(self.filtered_y), float(self.filtered_z)
         self.cmd_pub.publish(cmd)
 
         # ==========================================================

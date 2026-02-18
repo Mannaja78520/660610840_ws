@@ -54,7 +54,10 @@ install(PROGRAMS
   src/udp_sender_sub_from_ros2.py
   src/lock_client.py
   src/main_controller.py
-  control/mediapipe/mediapipe_control.py
+  # control/mediapipe/mediapipe_control.py
+  control/mediapipe/mediapipe_control_own_msg.py
+  # control/keyboard/keyboard_control.py
+  control/keyboard/keyboard_control_own_msg.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -106,6 +109,7 @@ install(TARGETS
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetMode.srv"
+  "msg/MecanumCmd.msg"
 )
 
 ################################################################################
